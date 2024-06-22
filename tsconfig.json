@@ -1,0 +1,19 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "CommonJS",
+		"moduleResolution": "Node",
+		"strict": true,
+		"noImplicitAny": false,
+		"declaration": false,
+		"skipLibCheck": true,
+		"strictNullChecks": true,
+		"resolveJsonModule": true,
+		"esModuleInterop": true,
+		"outDir": "build",
+		"baseUrl": "./",
+		"paths": {
+			"@utils/*": ["utils/*"]
+		}
+	}
+}
