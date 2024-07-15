@@ -6,7 +6,7 @@
 
 ## Documentation
 
-You can find the entire documentation [here](#) (replace with actual documentation link).
+You can find the entire documentation [here](https://docs.dragos.cc/discordts-base-v2/quickstart)
 
 ## Table of Contents
 
