@@ -5,7 +5,7 @@ const { GUILD_ID } = process.env;
 
 export default {
 	path: "/api/test",
-	method: "GET",
+	method: "GET", // can also be an array of methods such as ["GET", "POST", "PUT"]
 	callback: async function (client: Client, req: Request, res: Response) {
 		const guild = await client.guilds.fetch(String(GUILD_ID));
 		const channel = await guild.channels.fetch(String("1253847724894457996"));

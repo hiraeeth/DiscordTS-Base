@@ -8,6 +8,9 @@ export const options = {
 	},
 };
 
+import cfg from "@utils/config";
+const config = new cfg().load;
+
 export const callback = async (client: Client, interaction: CommandInteraction) => {
 	await interaction.reply("Pong!");
 };

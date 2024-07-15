@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { Client, REST, Routes, SlashCommandBuilder } from "discord.js";
+import { Client, REST, Routes, SlashCommandBuilder, Collection } from "discord.js";
 import express, { Response, Request, Application } from "express";
 
 import fs from "fs";
@@ -7,6 +7,7 @@ import path from "path";
 
 import { addAliases } from "module-alias";
 addAliases({
+	"@/*": `${__dirname}/*`,
 	"@utils": `${__dirname}/utils`,
 });
 
@@ -28,11 +29,29 @@ const recursive_read = (dir: string): string[] => {
 	return results;
 };
 
-import color from "@utils/colors";
-import logger from "@utils/logger";
+const color = (() => {
+	try {
+		return require("@utils/colors").default;
+	} catch (e) {
+		console.error("Colors module not found. You can download it here: https://github.com/hiraeeth/DiscordTS-Base ");
+		process.exit(1);
+	}
+})();
+
+const logger = (() => {
+	try {
+		return require("@utils/logger").default;
+	} catch (e) {
+		console.error("Logger module not found. You can download it here: https://github.com/hiraeeth/DiscordTS-Base ");
+		process.exit(1);
+	}
+})();
+
 const client = new Client({
 	intents: ["Guilds", "GuildMessages", "GuildMembers", "MessageContent"],
 });
+
+const config = new (require("@utils/config").default)().load;
 
 const { TOKEN, CLIENT_ID } = process.env;
 export type CommandOptions = {
@@ -59,28 +78,28 @@ export type Route = {
 	callback: (client: Client, req: Request, res: Response) => Promise<void>;
 };
 
-export const commands: Command[] = [];
-export const events: Event[] = [];
-export const routes: Route[] = [];
+client.commands = new Collection();
+client.events = new Collection();
+client.routes = new Collection();
 
-const { USE_WEB_SERVER, BASE_URL, BASE_PORT } = process.env;
 class RouteLoader {
 	private app: Application = express();
 	async init(port: number) {
-		try {
-			if (String(USE_WEB_SERVER).toLowerCase() === "yes" ? true : false) {
+		if (config.web_server && config.web_server.url && config.web_server.port) {
+			try {
 				this.app.listen(port, () => {
-					console.log(`${color.fg.cyan}App ${color.reset}‣ Application started ➔  ${color.fg.cyan}${BASE_URL}:${port}/${color.reset}.`);
+					const url = config.web_server.url.replace(/\/$/, "");
+					console.log(`${color.fg.cyan}App ${color.reset}‣ Application started ➔  ${color.fg.cyan}${url}:${port}${color.reset}.`);
 				});
+			} catch (e) {
+				console.error(`${color.fg.red}App ${color.reset}‣ Failed to start server: ${e}`);
+				logger.error(`Failed to start server: ${e}`);
 			}
-		} catch (e) {
-			console.error(`${color.fg.red}App ${color.reset}‣ Failed to start server: ${e}`);
-			logger.error(`Failed to start server: ${e}`);
 		}
 	}
 	async load(directory: string) {
-		if (String(USE_WEB_SERVER).toLowerCase() === "yes" ? true : false) {
-			await this.init(Number(BASE_PORT) || 3000);
+		if (config.web_server && config.web_server.url && config.web_server.port) {
+			await this.init(Number(config.web_server.port) || 3000);
 
 			const dir = path.join(__dirname, directory);
 			const files = recursive_read(dir);
@@ -100,6 +119,7 @@ class RouteLoader {
 							await callback(client, req, res);
 						});
 					}
+					client.routes.set(route_path, route);
 				} catch (e) {
 					console.error(`${color.fg.red}App ${color.reset}‣ Route ${route_path} callback returned an error: ${e}`);
 					logger.error(`Route ${route_path} callback returned an error: ${e}`);
@@ -119,17 +139,17 @@ class CommandLoader {
 		const folders = fs.readdirSync(dir);
 
 		for (const folder of folders) {
-			const command_path = path.join(dir, folder);
-			const files = fs.readdirSync(command_path).filter((file) => file.endsWith(".ts"));
+			const commandPath = path.join(dir, folder);
+			const files = fs.readdirSync(commandPath).filter((file) => file.endsWith(".ts"));
 
 			for (const file of files) {
-				const file_path = path.join(command_path, file);
-				const { data, callback, cooldown, options } = require(file_path);
+				const filePath = path.join(commandPath, file);
+				const { data, callback, cooldown, options } = require(filePath);
 
 				if (data && callback) {
-					commands.push({ data, callback, cooldown: cooldown || undefined, used: new Date(), options: options || { command: { guild: ["*"] } } });
+					client.commands.set(data.name, { data, callback, cooldown: cooldown || 0, used: new Date(0), options: options || { command: { guild: ["*"] } } });
 				} else {
-					const formatted = path.relative(process.cwd(), file_path);
+					const formatted = path.relative(process.cwd(), filePath);
 					console.error(
 						`${color.fg.red}⨯${color.reset} [${color.fg.red}${formatted}${color.reset}] ‣ File is missing ${color.fg.red}data${color.reset} or ${color.fg.red}callback${color.reset} exports. ${color.reset}`
 					);
@@ -148,37 +168,45 @@ class EventLoader {
 			const { default: event } = require(file);
 			const { name, once, callback } = event;
 
-			events.push({
-				name,
-				once,
-				callback,
-			});
+			client.events.set(name, { name, once, callback });
 
-			if (event.once) {
+			if (once) {
 				client.once(name, (...args) => callback(client, ...args));
 			} else {
 				client.on(name, (...args) => callback(client, ...args));
 			}
 		}
 
-		if (events.length > 0) {
-			console.log(`${color.fg.cyan}App ${color.reset}‣ Loaded ${color.fg.cyan}${events.length}${color.reset} ${events.length > 1 ? "events" : "event"}.`);
+		if (client.events.size > 0) {
+			console.log(`${color.fg.cyan}App ${color.reset}‣ Loaded ${color.fg.cyan}${client.events.size}${color.reset} ${client.events.size > 1 ? "events" : "event"}.`);
 		}
 	}
 }
 
-const rest = new REST({ version: "10" }).setToken(String(TOKEN));
+let rest: REST | undefined = undefined;
+try {
+	rest = new REST({ version: "10" }).setToken(String(TOKEN));
+} catch (e) {
+	rest = undefined;
+	console.error(`${color.fg.red}⨯${color.reset} ${e}.`);
+	logger.error(`REST client failed to start: ${e}`);
+}
+
 (async () => {
 	try {
+		if (rest == undefined) {
+			throw new Error("Failed to start the REST client.");
+		}
+
 		const start_time = new Date();
 		await new CommandLoader().load("./commands");
 		await new EventLoader().load("./events");
 		await new RouteLoader().load("./routes");
 
-		console.log(`${color.fg.cyan}App ${color.reset}‣ Started refreshing ${color.fg.cyan}${commands.length}${color.reset} application (/) ${commands.length > 1 ? "commands" : "command"}.`);
-		const map: { [key: string]: SlashCommandBuilder[] }[] = [];
+		console.log(`${color.fg.cyan}App ${color.reset}‣ Started refreshing ${color.fg.cyan}${client.commands.size}${color.reset} application (/) ${client.commands.size > 1 ? "commands" : "command"}.`);
+		const map: { [key: string]: SlashCommandBuilder[] } = {};
 
-		for (const command of commands) {
+		for (const [_, command] of client.commands) {
 			for (const guild of command.options.command.guild as string[]) {
 				if (!map[guild]) {
 					map[guild] = [];
@@ -199,8 +227,8 @@ const rest = new REST({ version: "10" }).setToken(String(TOKEN));
 		const time = ((end_time.getTime() - start_time.getTime()) / 1000).toFixed(2);
 
 		console.log(
-			`${color.fg.cyan}App ${color.reset}‣ [${color.fg.cyan}${time}s${color.reset}] Successfully reloaded ${color.fg.cyan}${commands.length}${color.reset} application (/) ${
-				commands.length > 1 ? "commands" : "command"
+			`${color.fg.cyan}App ${color.reset}‣ [${color.fg.cyan}${time}s${color.reset}] Successfully reloaded ${color.fg.cyan}${client.commands.size}${color.reset} application (/) ${
+				client.commands.size > 1 ? "commands" : "command"
 			}.`
 		);
 	} catch (e) {
@@ -209,40 +237,32 @@ const rest = new REST({ version: "10" }).setToken(String(TOKEN));
 	}
 })();
 
-client.on("interactionCreate", async (interaction) => {
-	if (!interaction.isChatInputCommand()) return;
-
-	for (const command of commands) {
-		if (interaction.commandName === command.data.name) {
-			const current_time = new Date().getTime();
-			try {
-				if (command.cooldown) {
-					if (command.used.getTime() + command.cooldown * 1000 <= current_time) {
-						await command.callback(client, interaction);
-						command.used = new Date();
-					} else {
-						await interaction.reply({ content: `Command is on a cooldown and cannot be used yet.`, ephemeral: true });
-					}
-				} else {
-					await command.callback(client, interaction);
-					command.used = new Date();
-				}
-			} catch (e) {
-				console.error(`${color.fg.red}⨯${color.reset} Command [${color.fg.red}${command.data.name}${color.reset}] callback returned an error: ${e}.`);
-				logger.error(`Command ${command.data.name} callback returned an error: ${e}`);
-				if (interaction.replied || interaction.deferred) {
-					await interaction.followUp({ content: "Command callback failed to be executed.", ephemeral: true });
-				} else {
-					await interaction.reply({ content: "Command callback failed to be executed.", ephemeral: true });
-				}
-			}
-		}
-	}
-});
-
 try {
 	client.login(TOKEN);
 } catch (e) {
 	console.error(`${color.fg.red}⨯${color.reset} ${e}.`);
-	logger.error(`BOT failed to start: ${e}`);
+	logger.error(`Login failed: ${e}`);
 }
+
+declare module "discord.js" {
+	interface Client {
+		commands: Collection<string, Command>;
+		events: Collection<string, Event>;
+		routes: Collection<string, Route>;
+	}
+}
+
+process.on("uncaughtException", (err) => {
+	console.error(`${color.fg.red}⨯${color.reset} ${color.fg.red}Uncaught Exception${color.reset} ‣ ${err} ${color.reset}`);
+	logger.error(`Uncaught Exception: ${err}`);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+	console.error(`${color.fg.red}⨯${color.reset} ${color.fg.red}Unhandled Rejection${color.reset} ‣ ${reason} ${color.reset}`);
+	logger.error(`Unhandled Rejection: ${reason} at ${promise}`);
+});
+
+client.on("error", (err) => {
+	console.error(`${color.fg.red}⨯${color.reset} [${color.fg.red}DISCORD${color.reset}] ‣ ${err} ${color.reset}`);
+	logger.error(`Discord error: ${err}`);
+});
