@@ -1,17 +1,17 @@
 import "dotenv/config";
-import { Client, REST, Routes, SlashCommandBuilder, Collection } from "discord.js";
+import { Client, REST, Routes, SlashCommandBuilder, Collection, Interaction } from "discord.js";
 import express, { Response, Request, Application } from "express";
-
 import fs from "fs";
 import path from "path";
-
 import { addAliases } from "module-alias";
+import { storage, Component } from "engine";
+
 addAliases({
 	"@/*": `${__dirname}/*`,
 	"@utils": `${__dirname}/utils`,
 });
 
-const recursive_read = (dir: string): string[] => {
+const recursiveRead = (dir: string): string[] => {
 	let results: string[] = [];
 	const list = fs.readdirSync(dir);
 
@@ -20,7 +20,7 @@ const recursive_read = (dir: string): string[] => {
 		const stat = fs.statSync(pth);
 
 		if (stat && stat.isDirectory()) {
-			results = results.concat(recursive_read(pth));
+			results = results.concat(recursiveRead(pth));
 		} else if (file.endsWith(".ts")) {
 			results.push(pth);
 		}
@@ -51,14 +51,19 @@ const client = new Client({
 	intents: ["Guilds", "GuildMessages", "GuildMembers", "MessageContent"],
 });
 
-const config = new (require("@utils/config").default)().load;
-
 const { TOKEN, CLIENT_ID } = process.env;
+if (!TOKEN || !CLIENT_ID) {
+	console.error(`${color.fg.red}⨯${color.reset} ${color.fg.red}TOKEN${color.reset} or ${color.fg.red}CLIENT_ID${color.reset} not found.`);
+	console.error(`${color.fg.red}⨯${color.reset} Please make sure you have a ${color.fg.red}.env${color.reset} file with TOKEN and CLIENT_ID.`);
+	process.exit(1);
+}
+
 export type CommandOptions = {
 	command: {
 		guild: string[];
 	};
 };
+
 export type Command = {
 	data: SlashCommandBuilder;
 	callback: (client: Client, interaction: any) => Promise<void>;
@@ -66,12 +71,15 @@ export type Command = {
 	used: Date;
 	options: CommandOptions;
 };
+
 export type Event = {
 	name: string;
 	once: boolean;
 	callback: (client: Client, ...args: any) => Promise<void>;
 };
+
 export type Methods = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS";
+
 export type Route = {
 	path: string;
 	method: Methods | Methods[];
@@ -81,55 +89,74 @@ export type Route = {
 client.commands = new Collection();
 client.events = new Collection();
 client.routes = new Collection();
+client.components = new Collection();
+
+import { ServerOptions } from "server";
 
 class RouteLoader {
 	private app: Application = express();
+	private methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
+
 	async init(port: number) {
-		if (config.web_server && config.web_server.url && config.web_server.port) {
-			try {
-				this.app.listen(port, () => {
-					const url = config.web_server.url.replace(/\/$/, "");
-					console.log(`${color.fg.cyan}App ${color.reset}‣ Application started ➔  ${color.fg.cyan}${url}:${port}${color.reset}.`);
-				});
-			} catch (e) {
-				console.error(`${color.fg.red}App ${color.reset}‣ Failed to start server: ${e}`);
-				logger.error(`Failed to start server: ${e}`);
-			}
+		if (!ServerOptions.enabled) {
+			return;
+		}
+
+		try {
+			this.app.listen(port, () => {
+				const url = (ServerOptions.url || "http://127.0.0.1/").replace(/\/$/, "");
+				console.log(`${color.fg.cyan}App ${color.reset}‣ Application started ➔  ${color.fg.cyan}${url}:${port}${color.reset}.`);
+			});
+		} catch (e) {
+			console.error(`${color.fg.red}App ${color.reset}‣ Failed to start server: ${e}`);
+			logger.error(`Failed to start server: ${e}`);
 		}
 	}
+
 	async load(directory: string) {
-		if (config.web_server && config.web_server.url && config.web_server.port) {
-			await this.init(Number(config.web_server.port) || 3000);
+		if (!ServerOptions.enabled) {
+			return;
+		}
 
-			const dir = path.join(__dirname, directory);
-			const files = recursive_read(dir);
+		if (!ServerOptions.port) {
+			console.error(`${color.fg.red}App ${color.reset}‣ ServerOptions.port is not defined`);
+			return;
+		}
 
-			for (const file of files) {
-				const { default: route } = require(file);
-				const { path: route_path, method, callback } = route;
+		await this.init(Number(ServerOptions.port) || 3000);
+		const dir = path.join(__dirname, directory);
+		const files = await recursiveRead(dir);
+
+		for (const file of files) {
+			const module = require(file);
+			const filePath = path.relative(dir, file).replace(/\.ts$/, "");
+			const routePath = `/${filePath.replace(/\\/g, "/")}`;
+
+			const methods = Object.keys(module).filter((key) => this.methods.includes(key) && typeof module[key] === "function");
+			for (const method of methods) {
+				const callback = module[method];
+				const lowerCaseMethod = method.toLowerCase();
+
 				try {
-					if (Array.isArray(method)) {
-						for (const mthd of method) {
-							this.app[String(mthd).toLowerCase()](route_path, async (req, res) => {
-								await callback(client, req, res);
-							});
-						}
-					} else {
-						this.app[String(method).toLowerCase()](route_path, async (req, res) => {
-							await callback(client, req, res);
-						});
-					}
-					client.routes.set(route_path, route);
+					this.app[lowerCaseMethod as keyof Application](routePath, async (req, res) => {
+						await callback(client, req, res);
+					});
+
+					client.routes.set(routePath, module);
 				} catch (e) {
-					console.error(`${color.fg.red}App ${color.reset}‣ Route ${route_path} callback returned an error: ${e}`);
-					logger.error(`Route ${route_path} callback returned an error: ${e}`);
+					console.error(`${color.fg.red}App ${color.reset}‣ Route ${routePath} callback returned an error: ${e}`);
+					logger.error(`Route ${routePath} callback returned an error: ${e}`);
 				}
 			}
-
-			this.app.all("*", (req: Request, res: Response) => {
-				res.status(404).json({ code: "route_not_found", message: "The requested route could not be found. Trying again won't solve the problem." });
-			});
 		}
+
+		if (client.routes.size > 0) {
+			console.log(`${color.fg.cyan}App ${color.reset}‣ Loaded ${color.fg.cyan}${client.routes.size}${color.reset} ${client.routes.size > 1 ? "routes" : "route"}.`);
+		}
+
+		this.app.all("*", (req: Request, res: Response) => {
+			res.status(404).json({ code: "route_not_found", message: "The requested route could not be found. Trying again won't solve the problem." });
+		});
 	}
 }
 
@@ -144,15 +171,26 @@ class CommandLoader {
 
 			for (const file of files) {
 				const filePath = path.join(commandPath, file);
-				const { data, callback, cooldown, options } = require(filePath);
+				const commandClass = require(filePath).default;
 
-				if (data && callback) {
-					client.commands.set(data.name, { data, callback, cooldown: cooldown || 0, used: new Date(0), options: options || { command: { guild: ["*"] } } });
+				if (commandClass && commandClass.callback) {
+					const metadata = storage[`command_${commandClass.name}`];
+					if (metadata) {
+						const { builder, cooldown, guilds } = metadata;
+						client.commands.set(builder.name, {
+							data: builder,
+							callback: commandClass.callback,
+							cooldown,
+							used: new Date(0),
+							options: { command: { guild: guilds } },
+						});
+					} else {
+						const formatted = path.relative(process.cwd(), filePath);
+						console.error(`${color.fg.red}⨯${color.reset} [${color.fg.red}${formatted}${color.reset}] ‣ Command metadata not found. ${color.reset}`);
+					}
 				} else {
 					const formatted = path.relative(process.cwd(), filePath);
-					console.error(
-						`${color.fg.red}⨯${color.reset} [${color.fg.red}${formatted}${color.reset}] ‣ File is missing ${color.fg.red}data${color.reset} or ${color.fg.red}callback${color.reset} exports. ${color.reset}`
-					);
+					console.error(`${color.fg.red}⨯${color.reset} [${color.fg.red}${formatted}${color.reset}] ‣ File is missing ${color.fg.red}callback${color.reset} static property. ${color.reset}`);
 				}
 			}
 		}
@@ -162,23 +200,65 @@ class CommandLoader {
 class EventLoader {
 	async load(directory: string) {
 		const dir = path.join(__dirname, directory);
-		const files = recursive_read(dir);
+		const files = fs.readdirSync(dir).filter((file) => file.endsWith(".ts"));
 
 		for (const file of files) {
-			const { default: event } = require(file);
-			const { name, once, callback } = event;
+			const filePath = path.join(dir, file);
+			const eventClass = require(filePath).default;
 
-			client.events.set(name, { name, once, callback });
+			if (eventClass && eventClass.callback) {
+				const metadata = storage[`event_${eventClass.name}`];
+				if (metadata) {
+					const { name, once } = metadata;
+					client.events.set(name, { name, once, callback: eventClass.callback });
 
-			if (once) {
-				client.once(name, (...args) => callback(client, ...args));
+					if (once) {
+						client.once(name, (...args) => eventClass.callback(client, ...args));
+					} else {
+						client.on(name, (...args) => eventClass.callback(client, ...args));
+					}
+				} else {
+					const formatted = path.relative(process.cwd(), filePath);
+					console.error(`${color.fg.red}⨯${color.reset} [${color.fg.red}${formatted}${color.reset}] ‣ Event metadata not found. ${color.reset}`);
+				}
 			} else {
-				client.on(name, (...args) => callback(client, ...args));
+				const formatted = path.relative(process.cwd(), filePath);
+				console.error(`${color.fg.red}⨯${color.reset} [${color.fg.red}${formatted}${color.reset}] ‣ File is missing ${color.fg.red}callback${color.reset} static property. ${color.reset}`);
 			}
 		}
 
 		if (client.events.size > 0) {
 			console.log(`${color.fg.cyan}App ${color.reset}‣ Loaded ${color.fg.cyan}${client.events.size}${color.reset} ${client.events.size > 1 ? "events" : "event"}.`);
+		}
+	}
+}
+
+class ComponentLoader {
+	async load(directory: string) {
+		const dir = path.join(__dirname, directory);
+		const files = fs.readdirSync(dir).filter((file) => file.endsWith(".ts"));
+
+		for (const file of files) {
+			const filePath = path.join(dir, file);
+			const componentClass = require(filePath).default;
+
+			if (componentClass && componentClass.callback) {
+				const metadata = storage[`component_${componentClass.name}`];
+				if (metadata) {
+					const { type, id } = metadata;
+					client.components.set(`${type}_${id}`, componentClass);
+				} else {
+					const formatted = path.relative(process.cwd(), filePath);
+					console.error(`${color.fg.red}⨯${color.reset} [${color.fg.red}${formatted}${color.reset}] ‣ Component metadata not found. ${color.reset}`);
+				}
+			} else {
+				const formatted = path.relative(process.cwd(), filePath);
+				console.error(`${color.fg.red}⨯${color.reset} [${color.fg.red}${formatted}${color.reset}] ‣ File is missing ${color.fg.red}callback${color.reset} static property. ${color.reset}`);
+			}
+		}
+
+		if (client.components.size > 0) {
+			console.log(`${color.fg.cyan}App ${color.reset}‣ Loaded ${color.fg.cyan}${client.components.size}${color.reset} ${client.components.size > 1 ? "components" : "component"}.`);
 		}
 	}
 }
@@ -198,33 +278,34 @@ try {
 			throw new Error("Failed to start the REST client.");
 		}
 
-		const start_time = new Date();
-		await new CommandLoader().load("./commands");
-		await new EventLoader().load("./events");
-		await new RouteLoader().load("./routes");
+		const startTime = new Date();
+		await new CommandLoader().load("./app/commands");
+		await new EventLoader().load("./app/events");
+		await new RouteLoader().load("./app/routes");
+		await new ComponentLoader().load("./app/components");
 
 		console.log(`${color.fg.cyan}App ${color.reset}‣ Started refreshing ${color.fg.cyan}${client.commands.size}${color.reset} application (/) ${client.commands.size > 1 ? "commands" : "command"}.`);
-		const map: { [key: string]: SlashCommandBuilder[] } = {};
+		const commandMap: { [key: string]: SlashCommandBuilder[] } = {};
 
 		for (const [_, command] of client.commands) {
 			for (const guild of command.options.command.guild as string[]) {
-				if (!map[guild]) {
-					map[guild] = [];
+				if (!commandMap[guild]) {
+					commandMap[guild] = [];
 				}
-				map[guild].push(command.data);
+				commandMap[guild].push(command.data);
 			}
 		}
 
-		for (const guild in map) {
+		for (const guild in commandMap) {
 			if (guild === "*") {
-				await rest.put(Routes.applicationCommands(String(CLIENT_ID)), { body: map[guild] });
+				await rest.put(Routes.applicationCommands(String(CLIENT_ID)), { body: commandMap[guild] });
 			} else {
-				await rest.put(Routes.applicationGuildCommands(String(CLIENT_ID), String(guild)), { body: map[guild] });
+				await rest.put(Routes.applicationGuildCommands(String(CLIENT_ID), String(guild)), { body: commandMap[guild] });
 			}
 		}
 
-		const end_time = new Date();
-		const time = ((end_time.getTime() - start_time.getTime()) / 1000).toFixed(2);
+		const endTime = new Date();
+		const time = ((endTime.getTime() - startTime.getTime()) / 1000).toFixed(2);
 
 		console.log(
 			`${color.fg.cyan}App ${color.reset}‣ [${color.fg.cyan}${time}s${color.reset}] Successfully reloaded ${color.fg.cyan}${client.commands.size}${color.reset} application (/) ${
@@ -249,6 +330,7 @@ declare module "discord.js" {
 		commands: Collection<string, Command>;
 		events: Collection<string, Event>;
 		routes: Collection<string, Route>;
+		components: Collection<string, any>;
 	}
 }
 

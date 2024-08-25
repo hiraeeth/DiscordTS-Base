@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    image: discordbot:latest
+    container_name: discordbot
+    ports:
+      - "3000:3000" # You can skip this if you don't have a web server
+    volumes:
+      - ./:/usr/src/app
+    environment:
+      - NODE_ENV=production

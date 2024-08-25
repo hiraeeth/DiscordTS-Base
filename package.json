@@ -4,8 +4,7 @@
 	"main": "build/index.js",
 	"scripts": {
 		"dev": "tsx watch index.ts",
-		"build": "tsc",
-		"start": "tsc && node build/."
+		"start": "npm install --save && tsx index.ts"
 	},
 	"keywords": [],
 	"author": "",
