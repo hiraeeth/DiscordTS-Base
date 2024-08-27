@@ -13,5 +13,5 @@
 - **Setup Guides** - eg: how to run this bot on Docker
 
 ## Documentation
-You can find the docs here: https://discord-base.gitbook.io/.
+You can find the docs here: https://discord-base.gitbook.io/
 > For help, you can contact me on discord **dragos112**
