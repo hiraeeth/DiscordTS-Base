@@ -8,41 +8,84 @@
 
 You can find the entire documentation [here](https://docs.dragos.cc/discordts-base-v2/quickstart)
 
-## Table of Contents
-
-- [Features](#features)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Commands](#commands)
-- [Contributing](#contributing)
-- [License](#license)
-
-## Features
-
-- Full implementation of discord.js v14 in TypeScript
-- Custom logger and config file parser, easier to share with people.
-- Clean code and well documented.
-- Comes with prebuilt utils such as local sql db (utils/sql) and remote mysql db (utils/db)
-
-## Installation
-
-To get started, clone the repository and install the dependencies:
-
-```bash
-git clone https://github.com/hiraeeth/DiscordTS-Base.git
-cd DiscordTS-Base
-npm install --save
+## Usage 📃 ‣
+* Edit ```.env.example``` with your unique data.
+* Install modules wtih ```npm install```
+* Use one of the available commands:
 ```
-## Contributing
+npm run dev
+npm run start
+npm run build
+```
 
-Contributions are welcome! If you have suggestions for improvements or want to add new features, feel free to open an issue or create a pull request.
+## Templates 🐱‍💻 ‣
+* ### Command
+```ts
+import { Client, CommandInteraction, SlashCommandBuilder } from "discord.js";
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b features/a_new_feature`)
-3. Commit your changes (`git commit -m 'New commit'`)
-4. Push to the branch (`git push origin feature/a_new_feature`)
-5. Open a pull request
+export const data = new SlashCommandBuilder().setName("ping").setDescription("Replies with Pong!");
+export const cooldown = 5;
+export const options = {
+	command: {
+		guild: ["*"],
+	},
+};
 
-## License
+export const callback = async (client: Client, interaction: CommandInteraction) => {
+	await interaction.reply("Pong!");
+};
+```
+* ### Event
+```ts
+import { Events, Client } from "discord.js";
+import color from "@utils/colors";
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+export default {
+	name: Events.ClientReady,
+	once: true,
+	callback: async function (client: Client, event: any) {
+		console.log(`${color.fg.cyan}App ${color.reset}‣ ${color.fg.cyan}${event.user.username}${color.reset} is online.`);
+	},
+};
+```
+* ### Route
+```ts
+import { Client } from "discord.js";
+import { Request, Response } from "express";
+
+const { GUILD_ID } = process.env;
+
+export default {
+	path: "/api/test",
+	method: "GET",
+	callback: async function (client: Client, req: Request, res: Response) {
+		const guild = await client.guilds.fetch(String(GUILD_ID));
+		const channel = await guild.channels.fetch(String("1253847724894457996"));
+
+		if (channel && channel.isTextBased()) {
+			await channel.send("Hello!");
+			console.log(`Message sent to channel ${channel.name}`);
+		} else {
+			console.log("The specified channel is not a text channel.");
+		}
+
+		return res.json({
+			message: `Message sent to channel: ${channel ? channel.name : "unknown"}`,
+		});
+	},
+};
+```
+## Extensions ➕ ‣
+* ### colors.ts (@utils/colors)
+```ts
+import color from "@utils/colors"
+console.log(`${color.fg.red}Hello in red ${color.reset}.`);
+```
+* ### logger.ts (@utils/logger)
+```ts
+import logger from "@utils/logger"
+logger.log("...")
+logger.warn("...")
+logger.debug("...")
+logger.error("...")
+```
