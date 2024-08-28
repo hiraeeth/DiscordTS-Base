@@ -64,9 +64,15 @@ export type CommandOptions = {
 	};
 };
 
+export type CallbackOptions = {
+	cooldown: number;
+	data: SlashCommandBuilder;
+	used: Date;
+};
+
 export type Command = {
 	data: SlashCommandBuilder;
-	callback: (client: Client, interaction: any) => Promise<void>;
+	callback: (client: Client, interaction: any, options: CallbackOptions) => Promise<void>;
 	cooldown: number;
 	used: Date;
 	options: CommandOptions;
@@ -90,6 +96,7 @@ client.commands = new Collection();
 client.events = new Collection();
 client.routes = new Collection();
 client.components = new Collection();
+client.globals = new Collection();
 
 import { ServerOptions } from "server";
 
@@ -172,6 +179,7 @@ class CommandLoader {
 			for (const file of files) {
 				const filePath = path.join(commandPath, file);
 				const commandClass = require(filePath).default;
+				const globals = require(filePath).globals;
 
 				if (commandClass && commandClass.callback) {
 					const metadata = storage[`command_${commandClass.name}`];
@@ -184,6 +192,8 @@ class CommandLoader {
 							used: new Date(0),
 							options: { command: { guild: guilds } },
 						});
+
+						client.globals.set(builder.name, globals);
 					} else {
 						const formatted = path.relative(process.cwd(), filePath);
 						console.error(`${color.fg.red}⨯${color.reset} [${color.fg.red}${formatted}${color.reset}] ‣ Command metadata not found. ${color.reset}`);
@@ -331,6 +341,7 @@ declare module "discord.js" {
 		events: Collection<string, Event>;
 		routes: Collection<string, Route>;
 		components: Collection<string, any>;
+		globals: Collection<string, any>;
 	}
 }
 

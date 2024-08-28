@@ -15,13 +15,21 @@ export default class InteractionCreateEvent {
 			try {
 				if (command.cooldown && command.cooldown > 0) {
 					if (command.used.getTime() + command.cooldown * 1000 <= current_time) {
-						await command.callback(client, interaction);
+						await command.callback(client, interaction, {
+							cooldown: command.cooldown,
+							used: command.used,
+							data: command.data,
+						});
 						command.used = new Date();
 					} else {
 						await interaction.reply({ content: "Command is on a cooldown and cannot be used yet.", ephemeral: true });
 					}
 				} else {
-					await command.callback(client, interaction);
+					await command.callback(client, interaction, {
+						cooldown: command.cooldown,
+						used: command.used,
+						data: command.data,
+					});
 					command.used = new Date();
 				}
 			} catch (e) {

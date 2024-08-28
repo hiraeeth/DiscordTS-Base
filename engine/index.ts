@@ -29,3 +29,6 @@ export function Component(id: string, type: componentTypes) {
 		storage[`component_${target.name}`] = { id, type, target };
 	};
 }
+
+import { CallbackOptions } from "index";
+export type CommandOptions = CallbackOptions;
