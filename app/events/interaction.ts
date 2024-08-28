@@ -19,6 +19,7 @@ export default class InteractionCreateEvent {
 							cooldown: command.cooldown,
 							used: command.used,
 							data: command.data,
+							options: command.options,
 						});
 						command.used = new Date();
 					} else {
@@ -29,6 +30,7 @@ export default class InteractionCreateEvent {
 						cooldown: command.cooldown,
 						used: command.used,
 						data: command.data,
+						options: command.options,
 					});
 					command.used = new Date();
 				}

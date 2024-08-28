@@ -68,6 +68,7 @@ export type CallbackOptions = {
 	cooldown: number;
 	data: SlashCommandBuilder;
 	used: Date;
+	options: CommandOptions;
 };
 
 export type Command = {
@@ -85,7 +86,6 @@ export type Event = {
 };
 
 export type Methods = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS";
-
 export type Route = {
 	path: string;
 	method: Methods | Methods[];
